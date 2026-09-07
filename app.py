@@ -115,6 +115,23 @@ def parse_time_to_seconds(time_str):
 
     return None
 
+def get_base_ydl_opts():
+    """Retorna as opções base do yt-dlp, injetando os cookies se configurados no ambiente."""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+    }
+    
+    cookies_content = os.environ.get("YT_COOKIES_CONTENT")
+    if cookies_content:
+        # Cria um arquivo temporário seguro na memória do servidor para o yt-dlp ler os cookies
+        cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
+        cookie_file.write(cookies_content)
+        cookie_file.close()
+        ydl_opts['cookiefile'] = cookie_file.name
+
+    return ydl_opts
+
 # Chave customizada para isolar o cache com base estrita na URL informada
 def make_cache_key():
     data = request.get_json() or {}
@@ -137,8 +154,10 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
+    ydl_opts = get_base_ydl_opts()
+
     if not is_url(user_input):
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
+        ydl_opts['extract_flat'] = True
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_results = ydl.extract_info(f"ytsearch5:{user_input}", download=False)
@@ -155,7 +174,7 @@ def get_video_info():
             return jsonify({'error': f'Erro ao realizar busca: {str(e)}'}), 500
 
     url = clean_youtube_url(user_input)
-    ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+    ydl_opts['noplaylist'] = True
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -238,13 +257,12 @@ def download_file():
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
 
-    ydl_opts = {
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update({
         'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4'
-    }
+    })
 
     if start_time is not None and end_time is not None and end_time > start_time:
         ydl_opts['download_ranges'] = lambda info_dict, ydl: [{'start_time': start_time, 'end_time': end_time}]
@@ -294,9 +312,6 @@ def download_file():
         file_ext = downloaded_file_path.split('.')[-1]
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '_', '-')]).strip() or "omnivideo"
         final_filename = f"{safe_title}.{file_ext}"
-
-        # A limpeza síncrona pós-requisição (@after_this_request) foi removida
-        # para evitar falhas e travamentos. Agora o APScheduler limpa em background.
 
         return send_file(downloaded_file_path, as_attachment=True, download_name=final_filename)
 
