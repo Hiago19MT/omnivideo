@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniVideo - Download Universal de Vídeos e Áudios</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="logo">
+            <i class="fa-solid fa-circle-play"></i> OmniVideo
+        </div>
+        <p class="subtitle" data-i18n="subtitle">Baixe vídeos e áudios de qualquer plataforma em alta qualidade</p>
+    </div>
+
+    <div class="card">
+        <div class="platforms">
+            <i class="fa-brands fa-youtube" title="YouTube"></i>
+            <i class="fa-brands fa-tiktok" title="TikTok"></i>
+            <i class="fa-brands fa-instagram" title="Instagram"></i>
+            <i class="fa-brands fa-x-twitter" title="X / Twitter"></i>
+            <i class="fa-brands fa-facebook" title="Facebook"></i>
+        </div>
+
+        <div class="search-box">
+            <div class="input-group">
+                <i class="fa-solid fa-link"></i>
+                <input type="text" id="urlInput" data-i18n-placeholder="placeholder" placeholder="Cole o link ou pesquise o nome do vídeo...">
+            </div>
+            
+            <button type="button" class="btn-paste" id="btnPaste" title="Colar da área de transferência">
+                <i class="fa-solid fa-paste"></i>
+            </button>
+
+            <button type="button" class="btn-analyze" id="btnAnalyze">
+                <i class="fa-solid fa-magnifying-glass"></i> <span data-i18n="btn_analyze">Analisar</span>
+            </button>
+        </div>
+
+        <div id="searchResults" class="search-results-container">
+            <label class="field-label" data-i18n="search_results">Resultados da busca:</label>
+            <div id="searchResultsList" class="search-results-list"></div>
+        </div>
+
+        <div id="result">
+            <div class="thumb-container" id="playerWrapper">
+                <img id="thumb" src="" alt="Thumbnail do vídeo">
+                
+                <div id="playOverlay">
+                    <div class="play-icon-circle">
+                        <i class="fa-solid fa-play"></i>
+                    </div>
+                </div>
+
+                <iframe id="videoIframe" allowfullscreen allow="autoplay"></iframe>
+            </div>
+
+            <div class="media-actions">
+                <button type="button" class="btn-thumb-download" id="btnThumbDownload">
+                    <i class="fa-solid fa-file-arrow-down"></i> <span data-i18n="btn_download_thumb">Baixar Capa (HD)</span>
+                </button>
+
+                <div class="qr-code-box">
+                    <span data-i18n="qr_code_label">Abrir no Celular:</span>
+                    <img id="qrCodeImg" src="" alt="QR Code">
+                </div>
+            </div>
+
+            <h3 id="videoTitle"></h3>
+            
+            <label class="field-label" for="downloadType" data-i18n="type_label">Tipo de Download</label>
+            <select id="downloadType">
+                <option value="mp4" data-i18n="opt_mp4">Vídeo (MP4)</option>
+                <option value="mp3" data-i18n="opt_mp3">Apenas Áudio (MP3)</option>
+                <option value="gif" data-i18n="opt_gif">Extrator de GIF Animado</option>
+                <option value="subtitle" data-i18n="opt_subtitle">Baixar Legendas (.SRT / .VTT)</option>
+            </select>
+
+            <div id="formatGroup">
+                <label class="field-label" for="formatSelect" data-i18n="quality_label">Selecione a Qualidade</label>
+                <select id="formatSelect"></select>
+            </div>
+
+            <div id="subtitleGroup" class="subtitle-group">
+                <label class="field-label" data-i18n="sub_label">Idioma e Formato da Legenda</label>
+                <div class="subtitle-controls">
+                    <select id="subLangSelect"></select>
+                    <select id="subExtSelect">
+                        <option value="srt">.SRT</option>
+                        <option value="vtt">.VTT</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="trimGroup">
+                <label class="field-label" data-i18n="trim_label">Corte de Trecho (Opcional - Ex: 00:30 até 01:45)</label>
+                <div class="trim-controls">
+                    <input type="text" id="startTime" data-i18n-placeholder="trim_start" placeholder="Início (ex: 00:30)">
+                    <input type="text" id="endTime" data-i18n-placeholder="trim_end" placeholder="Fim (ex: 01:45)">
+                </div>
+            </div>
+
+            <button class="download-btn" id="btnDownload">
+                <i class="fa-solid fa-download"></i> <span data-i18n="btn_download">Baixar Mídia</span>
+            </button>
+
+            <div id="statusBox" class="status-box">
+                <div class="status-info">
+                    <span id="statusText">Processando...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div id="progressBarFill" class="progress-bar-fill"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer" data-i18n="footer">
+        OmniVideo &copy; 2026 - O seu baixador de mídia universal
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

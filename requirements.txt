@@ -1,0 +1,9 @@
+flask
+flask-cors
+yt-dlp
+gunicorn
+requests
+static-ffmpeg
+flask-limiter
+flask-caching
+apscheduler
