@@ -124,11 +124,17 @@ def get_base_ydl_opts():
     
     cookies_content = os.environ.get("YT_COOKIES_CONTENT")
     if cookies_content:
-        # Cria um arquivo temporário seguro na memória do servidor para o yt-dlp ler os cookies
-        cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
-        cookie_file.write(cookies_content)
-        cookie_file.close()
-        ydl_opts['cookiefile'] = cookie_file.name
+        print(f"[DEBUG] Tamanho do conteúdo de cookies recebido: {len(cookies_content)} caracteres")
+        try:
+            cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
+            cookie_file.write(cookies_content)
+            cookie_file.close()
+            ydl_opts['cookiefile'] = cookie_file.name
+            print(f"[DEBUG] Arquivo temporário de cookies criado com sucesso em: {cookie_file.name}")
+        except Exception as e:
+            print(f"[DEBUG ERROR] Falha ao criar arquivo de cookies: {e}")
+    else:
+        print("[DEBUG WARNING] Variável YT_COOKIES_CONTENT não encontrada ou vazia!")
 
     return ydl_opts
 
