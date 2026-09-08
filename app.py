@@ -116,11 +116,12 @@ def parse_time_to_seconds(time_str):
     return None
 
 def get_base_ydl_opts():
-    """Retorna as opções base do yt-dlp, injetando clientes alternativos e cookies."""
+    """Retorna as opções base do yt-dlp injetando clients, user-agent e cookies normalizados."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        # Força clientes alternativos do YouTube para evitar bloqueio de "bot" em IPs de nuvem
+        # Força o User-Agent de um navegador real para bater com a assinatura dos cookies
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'mweb', 'web']
@@ -131,8 +132,11 @@ def get_base_ydl_opts():
     cookies_content = os.environ.get("YT_COOKIES_CONTENT")
     if cookies_content:
         try:
+            # Normaliza quebras de linha para evitar erro de incompatibilidade do Netscape format
+            normalized_cookies = cookies_content.replace('\r\n', '\n')
+            
             cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
-            cookie_file.write(cookies_content)
+            cookie_file.write(normalized_cookies)
             cookie_file.close()
             ydl_opts['cookiefile'] = cookie_file.name
         except Exception as e:
