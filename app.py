@@ -116,25 +116,27 @@ def parse_time_to_seconds(time_str):
     return None
 
 def get_base_ydl_opts():
-    """Retorna as opções base do yt-dlp, injetando os cookies se configurados no ambiente."""
+    """Retorna as opções base do yt-dlp, injetando clientes alternativos e cookies."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
+        # Força clientes alternativos do YouTube para evitar bloqueio de "bot" em IPs de nuvem
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'mweb', 'web']
+            }
+        }
     }
     
     cookies_content = os.environ.get("YT_COOKIES_CONTENT")
     if cookies_content:
-        print(f"[DEBUG] Tamanho do conteúdo de cookies recebido: {len(cookies_content)} caracteres")
         try:
             cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
             cookie_file.write(cookies_content)
             cookie_file.close()
             ydl_opts['cookiefile'] = cookie_file.name
-            print(f"[DEBUG] Arquivo temporário de cookies criado com sucesso em: {cookie_file.name}")
         except Exception as e:
             print(f"[DEBUG ERROR] Falha ao criar arquivo de cookies: {e}")
-    else:
-        print("[DEBUG WARNING] Variável YT_COOKIES_CONTENT não encontrada ou vazia!")
 
     return ydl_opts
 
