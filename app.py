@@ -106,26 +106,17 @@ def parse_time_to_seconds(time_str):
     return None
 
 def get_base_ydl_opts():
+    # Usa múltiplos clientes simulados para evitar bloqueios de IP de datacenter sem precisar de cookies
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'mweb', 'web']
+                'player_client': ['ios', 'android', 'web']
             }
         }
     }
-    cookies_content = os.environ.get("YT_COOKIES_CONTENT")
-    if cookies_content:
-        try:
-            normalized_cookies = cookies_content.replace('\r\n', '\n')
-            cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
-            cookie_file.write(normalized_cookies)
-            cookie_file.close()
-            ydl_opts['cookiefile'] = cookie_file.name
-        except Exception as e:
-            print(f"[DEBUG ERROR] Falha ao criar arquivo de cookies: {e}")
     return ydl_opts
 
 def make_cache_key():
