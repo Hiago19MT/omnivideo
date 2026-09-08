@@ -30,9 +30,10 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"
+    storage_uri="memory://"  # Em produção com múltiplos workers, pode apontar para Redis: redis://localhost:6379
 )
 
+# Handler personalizado para retornos amigáveis quando o limite for excedido
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({"error": "Muitas requisições. Aguarde um pouco e tente novamente."}), 429
@@ -41,8 +42,8 @@ def ratelimit_handler(e):
 # 2. CACHE DE METADADOS (Em Memória / Flask-Caching)
 # -----------------------------------------------------------------------------
 cache = Cache(app, config={
-    'CACHE_TYPE': 'SimpleCache',
-    'CACHE_DEFAULT_TIMEOUT': 1800
+    'CACHE_TYPE': 'SimpleCache',  # Para produção robusta com múltiplos processos, mude para 'RedisCache'
+    'CACHE_DEFAULT_TIMEOUT': 1800  # Metadados cacheados por 30 minutos
 })
 
 # -----------------------------------------------------------------------------
@@ -52,8 +53,10 @@ TEMP_BASE_DIR = tempfile.gettempdir()
 OMNIVIDEO_TEMP_PREFIX = "omnivideo_tmp_"
 
 def cleanup_old_files():
+    """Worker em background que remove pastas temporárias antigas (mais de 15 min)."""
     now = time.time()
-    cutoff = now - (15 * 60)
+    cutoff = now - (15 * 60)  # 15 minutos em segundos
+
     try:
         for item in os.listdir(TEMP_BASE_DIR):
             if item.startswith(OMNIVIDEO_TEMP_PREFIX):
@@ -64,6 +67,7 @@ def cleanup_old_files():
     except Exception as e:
         print(f"[CLEANUP ERROR] Falha na limpeza em background: {e}")
 
+# Inicia o agendador em segundo plano rodando a cada 10 minutos
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(cleanup_old_files, 'interval', minutes=10)
 scheduler.start()
@@ -83,15 +87,20 @@ def clean_youtube_url(url):
     return url
 
 def parse_time_to_seconds(time_str):
+    """Converte formatos flexíveis de tempo para segundos numéricos."""
     if not time_str:
         return None
+    
     clean_str = str(time_str).strip().lower()
+
     if clean_str.isdigit():
         return int(clean_str)
+
     m_s_match = re.match(r'^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$', clean_str)
     if m_s_match and any(m_s_match.groups()):
         h, m, s = m_s_match.groups()
         return (int(h or 0) * 3600) + (int(m or 0) * 60) + int(s or 0)
+
     parts = re.split(r'[:.,]', clean_str)
     try:
         parts = [int(p) for p in parts if p.strip() != '']
@@ -103,22 +112,10 @@ def parse_time_to_seconds(time_str):
             return parts[0]
     except ValueError:
         return None
+
     return None
 
-def get_base_ydl_opts():
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'geo_bypass': True,
-        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'web']
-            }
-        }
-    }
-    return ydl_opts
-
+# Chave customizada para isolar o cache com base estrita na URL informada
 def make_cache_key():
     data = request.get_json() or {}
     return f"info_url:{data.get('url', '').strip()}"
@@ -131,8 +128,8 @@ def home():
     return render_template('index.html')
 
 @app.route('/api/info', methods=['POST'])
-@limiter.limit("15 per minute")
-@cache.cached(timeout=1800, key_prefix=make_cache_key)
+@limiter.limit("15 per minute")  # Limite específico para buscas/análises
+@cache.cached(timeout=1800, key_prefix=make_cache_key)  # Retorna instantaneamente se já foi buscado recentemente
 def get_video_info():
     data = request.get_json() or {}
     user_input = data.get('url', '').strip()
@@ -140,10 +137,8 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
-    ydl_opts = get_base_ydl_opts()
-
     if not is_url(user_input):
-        ydl_opts['extract_flat'] = True
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_results = ydl.extract_info(f"ytsearch5:{user_input}", download=False)
@@ -160,18 +155,14 @@ def get_video_info():
             return jsonify({'error': f'Erro ao realizar busca: {str(e)}'}), 500
 
     url = clean_youtube_url(user_input)
-    ydl_opts['noplaylist'] = True
-    ydl_opts['ignoreerrors'] = True
+    ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            if not info:
-                return jsonify({'error': 'Não foi possível carregar as informações deste vídeo.'}), 500
-
             formats = [
-                {'format_id': 'bv*+ba/b', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
+                {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
                 {'format_id': 'bestaudio/best', 'ext': 'mp3', 'quality': 'Áudio MP3', 'type': 'Apenas Áudio'}
             ]
 
@@ -207,7 +198,7 @@ def download_thumb():
     title = request.args.get('title', 'capa')
     
     if not thumb_url:
-        return jsonify({'error': 'URL da imagem inválida'}), 400
+        return "URL da imagem inválida", 400
 
     try:
         response = requests.get(thumb_url, timeout=10)
@@ -223,13 +214,13 @@ def download_thumb():
             download_name=filename
         )
     except Exception as e:
-        return jsonify({'error': f'Erro ao baixar imagem: {str(e)}'}), 500
+        return f"Erro ao baixar imagem: {str(e)}", 500
 
 @app.route('/api/download')
-@limiter.limit("5 per minute")
+@limiter.limit("5 per minute")  # Protege o processamento pesado de conversão/vídeo no servidor
 def download_file():
     raw_video_url = request.args.get('url')
-    format_id = request.args.get('format_id', 'bv*+ba/b')
+    format_id = request.args.get('format_id', 'bestvideo+bestaudio/best')
     title = request.args.get('title', 'omnivideo')
     ext_req = request.args.get('ext', 'mp4')
     
@@ -238,20 +229,22 @@ def download_file():
     sub_lang = request.args.get('sub_lang')
 
     if not raw_video_url:
-        return jsonify({'error': 'URL inválida'}), 400
+        return "URL inválida", 400
 
     video_url = clean_youtube_url(raw_video_url)
     
+    # Cria pasta temporária usando o prefixo gerenciado pelo background worker
     temp_dir = tempfile.mkdtemp(prefix=OMNIVIDEO_TEMP_PREFIX)
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
 
-    ydl_opts = get_base_ydl_opts()
-    ydl_opts.update({
+    ydl_opts = {
         'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4'
-    })
+    }
 
     if start_time is not None and end_time is not None and end_time > start_time:
         ydl_opts['download_ranges'] = lambda info_dict, ydl: [{'start_time': start_time, 'end_time': end_time}]
@@ -274,10 +267,7 @@ def download_file():
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        if not format_id or format_id in ['bestvideo+bestaudio/best', 'bv*+ba/b']:
-            ydl_opts['format'] = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
-        else:
-            ydl_opts['format'] = f"{format_id}/bv*+ba/b/best"
+        ydl_opts['format'] = format_id
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -286,7 +276,7 @@ def download_file():
         files = os.listdir(temp_dir)
         if not files:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return jsonify({'error': 'Erro ao gerar arquivo.'}), 500
+            return "Erro ao gerar arquivo.", 500
 
         downloaded_file_path = os.path.join(temp_dir, files[0])
 
@@ -305,11 +295,14 @@ def download_file():
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '_', '-')]).strip() or "omnivideo"
         final_filename = f"{safe_title}.{file_ext}"
 
+        # A limpeza síncrona pós-requisição (@after_this_request) foi removida
+        # para evitar falhas e travamentos. Agora o APScheduler limpa em background.
+
         return send_file(downloaded_file_path, as_attachment=True, download_name=final_filename)
 
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
-        return jsonify({'error': f'Erro ao processar: {str(e)}'}), 500
+        return f"Erro ao processar: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
