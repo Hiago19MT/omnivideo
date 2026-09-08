@@ -30,10 +30,9 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"  # Em produção com múltiplos workers, pode apontar para Redis: redis://localhost:6379
+    storage_uri="memory://"
 )
 
-# Handler personalizado para retornos amigáveis quando o limite for excedido
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({"error": "Muitas requisições. Aguarde um pouco e tente novamente."}), 429
@@ -42,8 +41,8 @@ def ratelimit_handler(e):
 # 2. CACHE DE METADADOS (Em Memória / Flask-Caching)
 # -----------------------------------------------------------------------------
 cache = Cache(app, config={
-    'CACHE_TYPE': 'SimpleCache',  # Para produção robusta com múltiplos processos, mude para 'RedisCache'
-    'CACHE_DEFAULT_TIMEOUT': 1800  # Metadados cacheados por 30 minutos
+    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_DEFAULT_TIMEOUT': 1800
 })
 
 # -----------------------------------------------------------------------------
@@ -53,10 +52,8 @@ TEMP_BASE_DIR = tempfile.gettempdir()
 OMNIVIDEO_TEMP_PREFIX = "omnivideo_tmp_"
 
 def cleanup_old_files():
-    """Worker em background que remove pastas temporárias antigas (mais de 15 min)."""
     now = time.time()
-    cutoff = now - (15 * 60)  # 15 minutos em segundos
-
+    cutoff = now - (15 * 60)
     try:
         for item in os.listdir(TEMP_BASE_DIR):
             if item.startswith(OMNIVIDEO_TEMP_PREFIX):
@@ -67,7 +64,6 @@ def cleanup_old_files():
     except Exception as e:
         print(f"[CLEANUP ERROR] Falha na limpeza em background: {e}")
 
-# Inicia o agendador em segundo plano rodando a cada 10 minutos
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(cleanup_old_files, 'interval', minutes=10)
 scheduler.start()
@@ -87,20 +83,15 @@ def clean_youtube_url(url):
     return url
 
 def parse_time_to_seconds(time_str):
-    """Converte formatos flexíveis de tempo para segundos numéricos."""
     if not time_str:
         return None
-    
     clean_str = str(time_str).strip().lower()
-
     if clean_str.isdigit():
         return int(clean_str)
-
     m_s_match = re.match(r'^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$', clean_str)
     if m_s_match and any(m_s_match.groups()):
         h, m, s = m_s_match.groups()
         return (int(h or 0) * 3600) + (int(m or 0) * 60) + int(s or 0)
-
     parts = re.split(r'[:.,]', clean_str)
     try:
         parts = [int(p) for p in parts if p.strip() != '']
@@ -112,15 +103,12 @@ def parse_time_to_seconds(time_str):
             return parts[0]
     except ValueError:
         return None
-
     return None
 
 def get_base_ydl_opts():
-    """Retorna as opções base do yt-dlp injetando clients, user-agent e cookies normalizados."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        # Força o User-Agent de um navegador real para bater com a assinatura dos cookies
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
@@ -128,23 +116,18 @@ def get_base_ydl_opts():
             }
         }
     }
-    
     cookies_content = os.environ.get("YT_COOKIES_CONTENT")
     if cookies_content:
         try:
-            # Normaliza quebras de linha para evitar erro de incompatibilidade do Netscape format
             normalized_cookies = cookies_content.replace('\r\n', '\n')
-            
             cookie_file = tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8')
             cookie_file.write(normalized_cookies)
             cookie_file.close()
             ydl_opts['cookiefile'] = cookie_file.name
         except Exception as e:
             print(f"[DEBUG ERROR] Falha ao criar arquivo de cookies: {e}")
-
     return ydl_opts
 
-# Chave customizada para isolar o cache com base estrita na URL informada
 def make_cache_key():
     data = request.get_json() or {}
     return f"info_url:{data.get('url', '').strip()}"
@@ -157,8 +140,8 @@ def home():
     return render_template('index.html')
 
 @app.route('/api/info', methods=['POST'])
-@limiter.limit("15 per minute")  # Limite específico para buscas/análises
-@cache.cached(timeout=1800, key_prefix=make_cache_key)  # Retorna instantaneamente se já foi buscado recentemente
+@limiter.limit("15 per minute")
+@cache.cached(timeout=1800, key_prefix=make_cache_key)
 def get_video_info():
     data = request.get_json() or {}
     user_input = data.get('url', '').strip()
@@ -248,7 +231,7 @@ def download_thumb():
         return f"Erro ao baixar imagem: {str(e)}", 500
 
 @app.route('/api/download')
-@limiter.limit("5 per minute")  # Protege o processamento pesado de conversão/vídeo no servidor
+@limiter.limit("5 per minute")
 def download_file():
     raw_video_url = request.args.get('url')
     format_id = request.args.get('format_id', 'bv*+ba/b')
@@ -264,7 +247,6 @@ def download_file():
 
     video_url = clean_youtube_url(raw_video_url)
     
-    # Cria pasta temporária usando o prefixo gerenciado pelo background worker
     temp_dir = tempfile.mkdtemp(prefix=OMNIVIDEO_TEMP_PREFIX)
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
@@ -297,11 +279,11 @@ def download_file():
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        # Se vier o antigo 'bestvideo+bestaudio/best', substitui por bv*+ba/b para evitar incompatibilidade
-        if format_id == 'bestvideo+bestaudio/best':
-            ydl_opts['format'] = 'bv*+ba/b'
+        # Se o formato enviado for inválido ou estrito demais, aplica uma string robusta com fallbacks encadeados
+        if not format_id or format_id in ['bestvideo+bestaudio/best', 'bv*+ba/b']:
+            ydl_opts['format'] = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
         else:
-            ydl_opts['format'] = format_id
+            ydl_opts['format'] = f"{format_id}/bv*+ba/b/best"
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
