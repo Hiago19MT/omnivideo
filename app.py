@@ -115,6 +115,24 @@ def parse_time_to_seconds(time_str):
 
     return None
 
+def get_base_ydl_opts():
+    """Centraliza as configurações do yt-dlp para driblar bloqueios do TikTok e YouTube"""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'geo_bypass': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'web']
+            }
+        }
+    }
+    return ydl_opts
+
 # Chave customizada para isolar o cache com base estrita na URL informada
 def make_cache_key():
     data = request.get_json() or {}
@@ -137,8 +155,10 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
+    ydl_opts = get_base_ydl_opts()
+
     if not is_url(user_input):
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
+        ydl_opts['extract_flat'] = True
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_results = ydl.extract_info(f"ytsearch5:{user_input}", download=False)
@@ -155,14 +175,18 @@ def get_video_info():
             return jsonify({'error': f'Erro ao realizar busca: {str(e)}'}), 500
 
     url = clean_youtube_url(user_input)
-    ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+    ydl_opts['noplaylist'] = True
+    ydl_opts['ignoreerrors'] = True
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
+            if not info:
+                return jsonify({'error': 'Não foi possível carregar as informações deste vídeo.'}), 500
+            
             formats = [
-                {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
+                {'format_id': 'bv*+ba/b', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
                 {'format_id': 'bestaudio/best', 'ext': 'mp3', 'quality': 'Áudio MP3', 'type': 'Apenas Áudio'}
             ]
 
@@ -198,7 +222,7 @@ def download_thumb():
     title = request.args.get('title', 'capa')
     
     if not thumb_url:
-        return "URL da imagem inválida", 400
+        return jsonify({'error': 'URL da imagem inválida'}), 400
 
     try:
         response = requests.get(thumb_url, timeout=10)
@@ -214,13 +238,13 @@ def download_thumb():
             download_name=filename
         )
     except Exception as e:
-        return f"Erro ao baixar imagem: {str(e)}", 500
+        return jsonify({'error': f'Erro ao baixar imagem: {str(e)}'}), 500
 
 @app.route('/api/download')
 @limiter.limit("5 per minute")  # Protege o processamento pesado de conversão/vídeo no servidor
 def download_file():
     raw_video_url = request.args.get('url')
-    format_id = request.args.get('format_id', 'bestvideo+bestaudio/best')
+    format_id = request.args.get('format_id', 'bv*+ba/b')
     title = request.args.get('title', 'omnivideo')
     ext_req = request.args.get('ext', 'mp4')
     
@@ -229,7 +253,7 @@ def download_file():
     sub_lang = request.args.get('sub_lang')
 
     if not raw_video_url:
-        return "URL inválida", 400
+        return jsonify({'error': 'URL inválida'}), 400
 
     video_url = clean_youtube_url(raw_video_url)
     
@@ -238,13 +262,12 @@ def download_file():
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
 
-    ydl_opts = {
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update({
         'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4'
-    }
+    })
 
     if start_time is not None and end_time is not None and end_time > start_time:
         ydl_opts['download_ranges'] = lambda info_dict, ydl: [{'start_time': start_time, 'end_time': end_time}]
@@ -267,7 +290,11 @@ def download_file():
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        ydl_opts['format'] = format_id
+        # Usa fallbacks inteligentes se o format_id for nulo ou seguir o padrão legado
+        if not format_id or format_id in ['bestvideo+bestaudio/best', 'bv*+ba/b']:
+            ydl_opts['format'] = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
+        else:
+            ydl_opts['format'] = f"{format_id}/bv*+ba/b/best"
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -276,7 +303,7 @@ def download_file():
         files = os.listdir(temp_dir)
         if not files:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return "Erro ao gerar arquivo.", 500
+            return jsonify({'error': 'Erro ao gerar arquivo.'}), 500
 
         downloaded_file_path = os.path.join(temp_dir, files[0])
 
@@ -297,12 +324,11 @@ def download_file():
 
         # A limpeza síncrona pós-requisição (@after_this_request) foi removida
         # para evitar falhas e travamentos. Agora o APScheduler limpa em background.
-
         return send_file(downloaded_file_path, as_attachment=True, download_name=final_filename)
 
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
-        return f"Erro ao processar: {str(e)}", 500
+        return jsonify({'error': f'Erro ao processar: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
