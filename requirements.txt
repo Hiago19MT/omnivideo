@@ -7,4 +7,3 @@ static-ffmpeg
 flask-limiter
 flask-caching
 apscheduler
-yt-dlp--upgrade
