@@ -136,8 +136,12 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
-    # Configuração base de options com verificação de cookies se o arquivo existir
-    base_opts = {'quiet': True, 'no_warnings': True}
+    # Configuração base de opções com cookies e contorno para "The page needs to be reloaded"
+    base_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extractor_args': {'youtube': {'player_client': ['default', 'web_embedded']}}
+    }
     if os.path.exists(COOKIE_FILE):
         base_opts['cookiefile'] = COOKIE_FILE
 
@@ -246,7 +250,8 @@ def download_file():
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'merge_output_format': 'mp4'
+        'merge_output_format': 'mp4',
+        'extractor_args': {'youtube': {'player_client': ['default', 'web_embedded']}}
     }
 
     if os.path.exists(COOKIE_FILE):
