@@ -193,7 +193,7 @@ def get_video_info():
             info = ydl.extract_info(url, download=False)
             
             formats = [
-                {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
+                {'format_id': 'bv*+ba/b', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
                 {'format_id': 'bestaudio/best', 'ext': 'mp3', 'quality': 'Áudio MP3', 'type': 'Apenas Áudio'}
             ]
 
@@ -251,7 +251,7 @@ def download_thumb():
 @limiter.limit("5 per minute")  # Protege o processamento pesado de conversão/vídeo no servidor
 def download_file():
     raw_video_url = request.args.get('url')
-    format_id = request.args.get('format_id', 'bestvideo+bestaudio/best')
+    format_id = request.args.get('format_id', 'bv*+ba/b')
     title = request.args.get('title', 'omnivideo')
     ext_req = request.args.get('ext', 'mp4')
     
@@ -297,7 +297,11 @@ def download_file():
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        ydl_opts['format'] = format_id
+        # Se vier o antigo 'bestvideo+bestaudio/best', substitui por bv*+ba/b para evitar incompatibilidade
+        if format_id == 'bestvideo+bestaudio/best':
+            ydl_opts['format'] = 'bv*+ba/b'
+        else:
+            ydl_opts['format'] = format_id
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
