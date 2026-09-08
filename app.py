@@ -170,11 +170,15 @@ def get_video_info():
 
     url = clean_youtube_url(user_input)
     ydl_opts['noplaylist'] = True
+    ydl_opts['ignoreerrors'] = True
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
+            if not info:
+                return jsonify({'error': 'Não foi possível carregar as informações deste vídeo.'}), 500
+
             formats = [
                 {'format_id': 'bv*+ba/b', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
                 {'format_id': 'bestaudio/best', 'ext': 'mp3', 'quality': 'Áudio MP3', 'type': 'Apenas Áudio'}
@@ -279,7 +283,6 @@ def download_file():
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        # Se o formato enviado for inválido ou estrito demais, aplica uma string robusta com fallbacks encadeados
         if not format_id or format_id in ['bestvideo+bestaudio/best', 'bv*+ba/b']:
             ydl_opts['format'] = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
         else:
