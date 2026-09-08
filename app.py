@@ -23,6 +23,9 @@ static_ffmpeg.add_paths()
 app = Flask(__name__)
 CORS(app, expose_headers=["Content-Disposition"])
 
+# Caminho absoluto para o arquivo de cookies gerado
+COOKIE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
+
 # -----------------------------------------------------------------------------
 # 1. RATE LIMITING (Proteção contra abusos e tráfego automatizado)
 # -----------------------------------------------------------------------------
@@ -30,10 +33,9 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"  # Em produção com múltiplos workers, pode apontar para Redis: redis://localhost:6379
+    storage_uri="memory://"
 )
 
-# Handler personalizado para retornos amigáveis quando o limite for excedido
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({"error": "Muitas requisições. Aguarde um pouco e tente novamente."}), 429
@@ -42,8 +44,8 @@ def ratelimit_handler(e):
 # 2. CACHE DE METADADOS (Em Memória / Flask-Caching)
 # -----------------------------------------------------------------------------
 cache = Cache(app, config={
-    'CACHE_TYPE': 'SimpleCache',  # Para produção robusta com múltiplos processos, mude para 'RedisCache'
-    'CACHE_DEFAULT_TIMEOUT': 1800  # Metadados cacheados por 30 minutos
+    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_DEFAULT_TIMEOUT': 1800
 })
 
 # -----------------------------------------------------------------------------
@@ -55,7 +57,7 @@ OMNIVIDEO_TEMP_PREFIX = "omnivideo_tmp_"
 def cleanup_old_files():
     """Worker em background que remove pastas temporárias antigas (mais de 15 min)."""
     now = time.time()
-    cutoff = now - (15 * 60)  # 15 minutos em segundos
+    cutoff = now - (15 * 60)
 
     try:
         for item in os.listdir(TEMP_BASE_DIR):
@@ -67,7 +69,6 @@ def cleanup_old_files():
     except Exception as e:
         print(f"[CLEANUP ERROR] Falha na limpeza em background: {e}")
 
-# Inicia o agendador em segundo plano rodando a cada 10 minutos
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(cleanup_old_files, 'interval', minutes=10)
 scheduler.start()
@@ -87,7 +88,6 @@ def clean_youtube_url(url):
     return url
 
 def parse_time_to_seconds(time_str):
-    """Converte formatos flexíveis de tempo para segundos numéricos."""
     if not time_str:
         return None
     
@@ -115,7 +115,6 @@ def parse_time_to_seconds(time_str):
 
     return None
 
-# Chave customizada para isolar o cache com base estrita na URL informada
 def make_cache_key():
     data = request.get_json() or {}
     return f"info_url:{data.get('url', '').strip()}"
@@ -128,8 +127,8 @@ def home():
     return render_template('index.html')
 
 @app.route('/api/info', methods=['POST'])
-@limiter.limit("15 per minute")  # Limite específico para buscas/análises
-@cache.cached(timeout=1800, key_prefix=make_cache_key)  # Retorna instantaneamente se já foi buscado recentemente
+@limiter.limit("15 per minute")
+@cache.cached(timeout=1800, key_prefix=make_cache_key)
 def get_video_info():
     data = request.get_json() or {}
     user_input = data.get('url', '').strip()
@@ -137,8 +136,13 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
+    # Configuração base de options com verificação de cookies se o arquivo existir
+    base_opts = {'quiet': True, 'no_warnings': True}
+    if os.path.exists(COOKIE_FILE):
+        base_opts['cookiefile'] = COOKIE_FILE
+
     if not is_url(user_input):
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
+        ydl_opts = {**base_opts, 'extract_flat': True}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_results = ydl.extract_info(f"ytsearch5:{user_input}", download=False)
@@ -155,7 +159,7 @@ def get_video_info():
             return jsonify({'error': f'Erro ao realizar busca: {str(e)}'}), 500
 
     url = clean_youtube_url(user_input)
-    ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+    ydl_opts = {**base_opts, 'noplaylist': True}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -217,7 +221,7 @@ def download_thumb():
         return f"Erro ao baixar imagem: {str(e)}", 500
 
 @app.route('/api/download')
-@limiter.limit("5 per minute")  # Protege o processamento pesado de conversão/vídeo no servidor
+@limiter.limit("5 per minute")
 def download_file():
     raw_video_url = request.args.get('url')
     format_id = request.args.get('format_id', 'bestvideo+bestaudio/best')
@@ -233,7 +237,6 @@ def download_file():
 
     video_url = clean_youtube_url(raw_video_url)
     
-    # Cria pasta temporária usando o prefixo gerenciado pelo background worker
     temp_dir = tempfile.mkdtemp(prefix=OMNIVIDEO_TEMP_PREFIX)
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
@@ -245,6 +248,9 @@ def download_file():
         'noplaylist': True,
         'merge_output_format': 'mp4'
     }
+
+    if os.path.exists(COOKIE_FILE):
+        ydl_opts['cookiefile'] = COOKIE_FILE
 
     if start_time is not None and end_time is not None and end_time > start_time:
         ydl_opts['download_ranges'] = lambda info_dict, ydl: [{'start_time': start_time, 'end_time': end_time}]
@@ -294,9 +300,6 @@ def download_file():
         file_ext = downloaded_file_path.split('.')[-1]
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '_', '-')]).strip() or "omnivideo"
         final_filename = f"{safe_title}.{file_ext}"
-
-        # A limpeza síncrona pós-requisição (@after_this_request) foi removida
-        # para evitar falhas e travamentos. Agora o APScheduler limpa em background.
 
         return send_file(downloaded_file_path, as_attachment=True, download_name=final_filename)
 
