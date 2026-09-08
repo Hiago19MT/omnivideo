@@ -106,7 +106,6 @@ def parse_time_to_seconds(time_str):
     return None
 
 def get_base_ydl_opts():
-    # Usa múltiplos clientes simulados para evitar bloqueios de IP de datacenter sem precisar de cookies
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -207,7 +206,7 @@ def download_thumb():
     title = request.args.get('title', 'capa')
     
     if not thumb_url:
-        return "URL da imagem inválida", 400
+        return jsonify({'error': 'URL da imagem inválida'}), 400
 
     try:
         response = requests.get(thumb_url, timeout=10)
@@ -223,7 +222,7 @@ def download_thumb():
             download_name=filename
         )
     except Exception as e:
-        return f"Erro ao baixar imagem: {str(e)}", 500
+        return jsonify({'error': f'Erro ao baixar imagem: {str(e)}'}), 500
 
 @app.route('/api/download')
 @limiter.limit("5 per minute")
@@ -238,7 +237,7 @@ def download_file():
     sub_lang = request.args.get('sub_lang')
 
     if not raw_video_url:
-        return "URL inválida", 400
+        return jsonify({'error': 'URL inválida'}), 400
 
     video_url = clean_youtube_url(raw_video_url)
     
@@ -286,7 +285,7 @@ def download_file():
         files = os.listdir(temp_dir)
         if not files:
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return "Erro ao gerar arquivo.", 500
+            return jsonify({'error': 'Erro ao gerar arquivo.'}), 500
 
         downloaded_file_path = os.path.join(temp_dir, files[0])
 
@@ -309,7 +308,7 @@ def download_file():
 
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
-        return f"Erro ao processar: {str(e)}", 500
+        return jsonify({'error': f'Erro ao processar: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
