@@ -31,7 +31,8 @@ const i18n = {
         best_quality: "Melhor Qualidade",
         btn_download_thumb: "Baixar Capa (HD)",
         qr_code_label: "Abrir no Celular:",
-        clipboard_permission_error: "Não foi possível acessar a área de transferência."
+        clipboard_permission_error: "Não foi possível acessar a área de transferência.",
+        direct_download_label: "Download rápido (direto, sem passar pelo nosso servidor)"
     },
     en: {
         subtitle: "Download videos and audio from any platform in high quality",
@@ -64,7 +65,8 @@ const i18n = {
         best_quality: "Best Quality",
         btn_download_thumb: "Download Cover (HD)",
         qr_code_label: "Scan for Mobile:",
-        clipboard_permission_error: "Could not access clipboard."
+        clipboard_permission_error: "Could not access clipboard.",
+        direct_download_label: "Fast download (direct, skips our server)"
     },
     es: {
         subtitle: "Descarga videos y audios de cualquier plataforma en alta calidad",
@@ -97,7 +99,8 @@ const i18n = {
         best_quality: "Mejor Calidad",
         btn_download_thumb: "Descargar Portada (HD)",
         qr_code_label: "Abrir en Móvil:",
-        clipboard_permission_error: "No se pudo acceder al portapapeles."
+        clipboard_permission_error: "No se pudo acceder al portapapeles.",
+        direct_download_label: "Descarga rápida (directa, sin pasar por nuestro servidor)"
     }
 };
 
@@ -317,6 +320,18 @@ function renderVideoDetails(data) {
             opt.value = '';
             opt.innerText = dict.no_subtitles;
             subLangSelect.appendChild(opt);
+        }
+    }
+
+    const directLink = document.getElementById('directDownloadLink');
+    if (directLink) {
+        if (data.direct_download && data.direct_download.url) {
+            directLink.href = data.direct_download.url;
+            directLink.querySelector('span').innerText =
+                `${dict.direct_download_label} (${data.direct_download.quality})`;
+            directLink.style.display = 'flex';
+        } else {
+            directLink.style.display = 'none';
         }
     }
 

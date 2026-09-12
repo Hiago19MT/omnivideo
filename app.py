@@ -17,17 +17,26 @@ import time
 from io import BytesIO
 from urllib.parse import urlparse, parse_qs
 
-# Garante a presença e o registro das bibliotecas do FFmpeg no ambiente
 static_ffmpeg.add_paths()
 
 app = Flask(__name__)
 CORS(app, expose_headers=["Content-Disposition"])
 
-# Caminho absoluto para o arquivo de cookies gerado
-COOKIE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
+# -----------------------------------------------------------------------------
+# COOKIES
+# -----------------------------------------------------------------------------
+# IMPORTANTE: cookies.txt NUNCA deve ir pro git (ele está no .gitignore de propósito).
+# Em produção (Oracle), suba o arquivo diretamente no servidor por scp/painel/volume,
+# fora do fluxo de deploy via git. Um único arquivo no formato Netscape pode conter
+# cookies de várias origens (youtube.com e instagram.com) ao mesmo tempo — basta
+# exportar os dois enquanto estiver logado nos dois sites com a extensão de cookies.
+# Se preferir manter arquivos separados, defina as variáveis de ambiente abaixo.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+YOUTUBE_COOKIE_FILE = os.environ.get('YOUTUBE_COOKIE_FILE', os.path.join(BASE_DIR, 'cookies.txt'))
+INSTAGRAM_COOKIE_FILE = os.environ.get('INSTAGRAM_COOKIE_FILE', os.path.join(BASE_DIR, 'cookies.txt'))
 
 # -----------------------------------------------------------------------------
-# 1. RATE LIMITING (Proteção contra abusos e tráfego automatizado)
+# RATE LIMITING
 # -----------------------------------------------------------------------------
 limiter = Limiter(
     get_remote_address,
@@ -41,7 +50,7 @@ def ratelimit_handler(e):
     return jsonify({"error": "Muitas requisições. Aguarde um pouco e tente novamente."}), 429
 
 # -----------------------------------------------------------------------------
-# 2. CACHE DE METADADOS (Em Memória / Flask-Caching)
+# CACHE DE METADADOS
 # -----------------------------------------------------------------------------
 cache = Cache(app, config={
     'CACHE_TYPE': 'SimpleCache',
@@ -49,25 +58,22 @@ cache = Cache(app, config={
 })
 
 # -----------------------------------------------------------------------------
-# 3. LIMPEZA AUTOMÁTICA DE DISCO EM BACKGROUND (APScheduler)
+# LIMPEZA AUTOMÁTICA DE DISCO
 # -----------------------------------------------------------------------------
 TEMP_BASE_DIR = tempfile.gettempdir()
 OMNIVIDEO_TEMP_PREFIX = "omnivideo_tmp_"
 
 def cleanup_old_files():
-    """Worker em background que remove pastas temporárias antigas (mais de 15 min)."""
     now = time.time()
     cutoff = now - (15 * 60)
-
     try:
         for item in os.listdir(TEMP_BASE_DIR):
             if item.startswith(OMNIVIDEO_TEMP_PREFIX):
                 folder_path = os.path.join(TEMP_BASE_DIR, item)
-                if os.path.isdir(folder_path):
-                    if os.path.getmtime(folder_path) < cutoff:
-                        shutil.rmtree(folder_path, ignore_errors=True)
+                if os.path.isdir(folder_path) and os.path.getmtime(folder_path) < cutoff:
+                    shutil.rmtree(folder_path, ignore_errors=True)
     except Exception as e:
-        print(f"[CLEANUP ERROR] Falha na limpeza em background: {e}")
+        print(f"[CLEANUP ERROR] {e}")
 
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(cleanup_old_files, 'interval', minutes=10)
@@ -87,20 +93,34 @@ def clean_youtube_url(url):
             return f"https://www.youtube.com/watch?v={video_id}"
     return url
 
+def detect_platform(url):
+    u = url.lower()
+    if 'instagram.com' in u:
+        return 'instagram'
+    if 'youtube.com' in u or 'youtu.be' in u:
+        return 'youtube'
+    if 'tiktok.com' in u:
+        return 'tiktok'
+    if 'twitter.com' in u or 'x.com' in u:
+        return 'twitter'
+    if 'facebook.com' in u or 'fb.watch' in u:
+        return 'facebook'
+    return 'other'
+
+def cookie_file_for(platform):
+    path = INSTAGRAM_COOKIE_FILE if platform == 'instagram' else YOUTUBE_COOKIE_FILE
+    return path if os.path.exists(path) else None
+
 def parse_time_to_seconds(time_str):
     if not time_str:
         return None
-    
     clean_str = str(time_str).strip().lower()
-
     if clean_str.isdigit():
         return int(clean_str)
-
     m_s_match = re.match(r'^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$', clean_str)
     if m_s_match and any(m_s_match.groups()):
         h, m, s = m_s_match.groups()
         return (int(h or 0) * 3600) + (int(m or 0) * 60) + int(s or 0)
-
     parts = re.split(r'[:.,]', clean_str)
     try:
         parts = [int(p) for p in parts if p.strip() != '']
@@ -112,12 +132,43 @@ def parse_time_to_seconds(time_str):
             return parts[0]
     except ValueError:
         return None
-
     return None
 
 def make_cache_key():
     data = request.get_json() or {}
     return f"info_url:{data.get('url', '').strip()}"
+
+def base_ydl_opts(platform):
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extractor_args': {'youtube': {'player_client': ['web_embedded', 'android', 'ios', 'tv_embedded']}}
+    }
+    cf = cookie_file_for(platform)
+    if cf:
+        opts['cookiefile'] = cf
+    return opts
+
+def find_progressive_format(info):
+    """Retorna o melhor formato progressivo (video+audio juntos, URL direta,
+    sem fragmentação) para permitir download direto pelo navegador, sem
+    passar pelo nosso servidor."""
+    candidates = []
+    for f in info.get('formats', []):
+        if (f.get('url') and f.get('vcodec') not in (None, 'none')
+                and f.get('acodec') not in (None, 'none')
+                and not f.get('fragments')
+                and f.get('protocol', '').startswith('http')):
+            candidates.append(f)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda f: f.get('height') or 0, reverse=True)
+    best = candidates[0]
+    return {
+        'url': best['url'],
+        'ext': best.get('ext', 'mp4'),
+        'quality': f"{best.get('height')}p" if best.get('height') else 'padrão'
+    }
 
 # -----------------------------------------------------------------------------
 # ROTAS
@@ -136,17 +187,8 @@ def get_video_info():
     if not user_input:
         return jsonify({'error': 'Digite um nome ou cole uma URL válida.'}), 400
 
-    # Configuração base de opções com cookies e contorno para "The page needs to be reloaded"
-    base_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'extractor_args': {'youtube': {'player_client': ['default', 'web_embedded']}}
-    }
-    if os.path.exists(COOKIE_FILE):
-        base_opts['cookiefile'] = COOKIE_FILE
-
     if not is_url(user_input):
-        ydl_opts = {**base_opts, 'extract_flat': True}
+        ydl_opts = {**base_ydl_opts('youtube'), 'extract_flat': True}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_results = ydl.extract_info(f"ytsearch5:{user_input}", download=False)
@@ -162,13 +204,14 @@ def get_video_info():
         except Exception as e:
             return jsonify({'error': f'Erro ao realizar busca: {str(e)}'}), 500
 
-    url = clean_youtube_url(user_input)
-    ydl_opts = {**base_opts, 'noplaylist': True}
+    platform = detect_platform(user_input)
+    url = clean_youtube_url(user_input) if platform == 'youtube' else user_input
+    ydl_opts = {**base_ydl_opts(platform), 'noplaylist': True}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
+
             formats = [
                 {'format_id': 'bestvideo+bestaudio/best', 'ext': 'mp4', 'quality': 'Melhor Qualidade', 'type': 'Vídeo + Áudio'},
                 {'format_id': 'bestaudio/best', 'ext': 'mp3', 'quality': 'Áudio MP3', 'type': 'Apenas Áudio'}
@@ -182,19 +225,25 @@ def get_video_info():
             video_id = info.get('id')
             extractor = info.get('extractor', '').lower()
             embed_url = None
-
             if video_id and ('youtube' in extractor or 'youtube' in url or 'youtu.be' in url):
                 embed_url = f"https://www.youtube-nocookie.com/embed/{video_id}"
 
+            # Só oferecemos download direto (sem passar pelo nosso servidor) para
+            # plataformas onde isso é tecnicamente viável e permitido pelo CDN.
+            # Instagram não entra aqui: exige sessão logada e não expõe URL pública.
+            direct = find_progressive_format(info) if platform in ('youtube', 'tiktok', 'twitter') else None
+
             return jsonify({
                 'is_search': False,
+                'platform': platform,
                 'title': info.get('title', 'video_omnivideo'),
                 'thumbnail': info.get('thumbnail'),
                 'duration': info.get('duration'),
                 'formats': formats,
                 'subtitles': subtitles,
                 'original_url': url,
-                'embed_url': embed_url
+                'embed_url': embed_url,
+                'direct_download': direct
             })
     except Exception as e:
         return jsonify({'error': f'Falha ao processar o vídeo: {str(e)}'}), 500
@@ -204,23 +253,14 @@ def get_video_info():
 def download_thumb():
     thumb_url = request.args.get('url')
     title = request.args.get('title', 'capa')
-    
     if not thumb_url:
         return "URL da imagem inválida", 400
-
     try:
         response = requests.get(thumb_url, timeout=10)
         response.raise_for_status()
-
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '_', '-')]).strip() or "capa"
         filename = f"{safe_title}_capa.jpg"
-
-        return send_file(
-            BytesIO(response.content),
-            mimetype='image/jpeg',
-            as_attachment=True,
-            download_name=filename
-        )
+        return send_file(BytesIO(response.content), mimetype='image/jpeg', as_attachment=True, download_name=filename)
     except Exception as e:
         return f"Erro ao baixar imagem: {str(e)}", 500
 
@@ -231,7 +271,7 @@ def download_file():
     format_id = request.args.get('format_id', 'bestvideo+bestaudio/best')
     title = request.args.get('title', 'omnivideo')
     ext_req = request.args.get('ext', 'mp4')
-    
+
     start_time = parse_time_to_seconds(request.args.get('start'))
     end_time = parse_time_to_seconds(request.args.get('end'))
     sub_lang = request.args.get('sub_lang')
@@ -239,23 +279,19 @@ def download_file():
     if not raw_video_url:
         return "URL inválida", 400
 
-    video_url = clean_youtube_url(raw_video_url)
-    
+    platform = detect_platform(raw_video_url)
+    video_url = clean_youtube_url(raw_video_url) if platform == 'youtube' else raw_video_url
+
     temp_dir = tempfile.mkdtemp(prefix=OMNIVIDEO_TEMP_PREFIX)
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(temp_dir, f"{unique_id}.%(ext)s")
 
     ydl_opts = {
+        **base_ydl_opts(platform),
         'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
         'noplaylist': True,
         'merge_output_format': 'mp4',
-        'extractor_args': {'youtube': {'player_client': ['default', 'web_embedded']}}
     }
-
-    if os.path.exists(COOKIE_FILE):
-        ydl_opts['cookiefile'] = COOKIE_FILE
 
     if start_time is not None and end_time is not None and end_time > start_time:
         ydl_opts['download_ranges'] = lambda info_dict, ydl: [{'start_time': start_time, 'end_time': end_time}]
@@ -293,12 +329,7 @@ def download_file():
 
         if ext_req == 'gif':
             gif_path = os.path.join(temp_dir, f"{unique_id}.gif")
-            cmd = [
-                'ffmpeg', '-y',
-                '-i', downloaded_file_path,
-                '-vf', 'fps=10,scale=480:-1:flags=lanczos',
-                gif_path
-            ]
+            cmd = ['ffmpeg', '-y', '-i', downloaded_file_path, '-vf', 'fps=10,scale=480:-1:flags=lanczos', gif_path]
             subprocess.run(cmd, check=True)
             downloaded_file_path = gif_path
 
@@ -307,7 +338,6 @@ def download_file():
         final_filename = f"{safe_title}.{file_ext}"
 
         return send_file(downloaded_file_path, as_attachment=True, download_name=final_filename)
-
     except Exception as e:
         shutil.rmtree(temp_dir, ignore_errors=True)
         return f"Erro ao processar: {str(e)}", 500

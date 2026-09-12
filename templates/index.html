@@ -31,7 +31,7 @@
                 <i class="fa-solid fa-link"></i>
                 <input type="text" id="urlInput" data-i18n-placeholder="placeholder" placeholder="Cole o link ou pesquise o nome do vídeo...">
             </div>
-            
+
             <button type="button" class="btn-paste" id="btnPaste" title="Colar da área de transferência">
                 <i class="fa-solid fa-paste"></i>
             </button>
@@ -49,7 +49,7 @@
         <div id="result">
             <div class="thumb-container" id="playerWrapper">
                 <img id="thumb" src="" alt="Thumbnail do vídeo">
-                
+
                 <div id="playOverlay">
                     <div class="play-icon-circle">
                         <i class="fa-solid fa-play"></i>
@@ -71,7 +71,12 @@
             </div>
 
             <h3 id="videoTitle"></h3>
-            
+
+            <a id="directDownloadLink" class="direct-download-link" style="display:none;" download>
+                <i class="fa-solid fa-bolt"></i>
+                <span data-i18n="direct_download_label">Download rápido (direto, sem passar pelo nosso servidor)</span>
+            </a>
+
             <label class="field-label" for="downloadType" data-i18n="type_label">Tipo de Download</label>
             <select id="downloadType">
                 <option value="mp4" data-i18n="opt_mp4">Vídeo (MP4)</option>
